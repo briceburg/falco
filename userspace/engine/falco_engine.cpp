@@ -112,15 +112,46 @@ void falco_engine::enable_rule(string &pattern, bool enabled)
 	m_evttype_filter->enable(pattern, enabled);
 }
 
-unique_ptr<falco_engine::rule_result> falco_engine::process_event(sinsp_evt *ev)
+void falco_engine::enable_rule_by_tag(set<string> &tags, bool enabled)
 {
+	tag_match_t ntags = gen_tag_match(tags);
+
+	m_evttype_filter->enable_tags(ntags, enabled);
+}
+
+falco_engine::tag_match_t falco_engine::gen_tag_match(std::set<string> &tags)
+{
+	tag_match_t ntags;
+
+	for(auto &tag : tags)
+	{
+		auto it = m_known_tags.find(tag);
+		if(it == m_known_tags.end())
+		{
+			throw falco_exception("No tag " + tag + " found in set of loaded falco rules");
+		}
+
+		ntags.insert(it->second);
+	}
+
+	return ntags;
+}
+
+unique_ptr<falco_engine::rule_result> falco_engine::process_event(sinsp_evt *ev, tag_match_t *match)
+{
+	set<sinsp_evttype_filter::tag_t> tags;
+
+	if(match)
+	{
+		tags = *match;
+	}
 
 	if(should_drop_evt())
 	{
 		return unique_ptr<struct rule_result>();
 	}
 
-	if(!m_evttype_filter->run(ev))
+	if(!m_evttype_filter->run(ev, tags))
 	{
 		return unique_ptr<struct rule_result>();
 	}
@@ -182,10 +213,26 @@ void falco_engine::print_stats()
 }
 
 void falco_engine::add_evttype_filter(string &rule,
-				      list<uint32_t> &evttypes,
+				      set<uint32_t> &evttypes,
+				      set<string> &tags,
 				      sinsp_filter* filter)
 {
-	m_evttype_filter->add(rule, evttypes, filter);
+	set<sinsp_evttype_filter::tag_t> ntags;
+
+	for(auto &tag : tags)
+	{
+		auto it = m_known_tags.find(tag);
+		if(it == m_known_tags.end())
+		{
+			m_known_tags[tag] = m_next_tag;
+			m_next_tag++;
+			it = m_known_tags.find(tag);
+		}
+
+		ntags.insert(it->second);
+	}
+
+	m_evttype_filter->add(rule, evttypes, ntags, filter);
 }
 
 void falco_engine::clear_filters()

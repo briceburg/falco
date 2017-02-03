@@ -100,6 +100,8 @@ static void usage()
 	   "                               Can be specified multiple times to read from multiple files.\n"
 	   " -s <stats_file>               If specified, write statistics related to falco's reading/processing of events\n"
 	   "                               to this file. (Only useful in live mode).\n"
+	   " -T <tag>                      Disable any rules with a tag=<tag>. Can be specified multiple times\n"
+	   " -t <tag>                      Only run those rules with a tag=<tag>. Can be specified multiple times\n"
 	   " -v                            Verbose output.\n"
 	   "\n"
     );
@@ -128,7 +130,8 @@ std::list<string> cmdline_options;
 uint64_t do_inspect(falco_engine *engine,
 		    falco_outputs *outputs,
 		    sinsp* inspector,
-		    string &stats_filename)
+		    string &stats_filename,
+		    falco_engine::tag_match_t &match)
 {
 	uint64_t num_evts = 0;
 	int32_t res;
@@ -188,7 +191,7 @@ uint64_t do_inspect(falco_engine *engine,
 		// engine, which will match the event against the set
 		// of rules. If a match is found, pass the event to
 		// the outputs.
-		unique_ptr<falco_engine::rule_result> res = engine->process_event(ev);
+		unique_ptr<falco_engine::rule_result> res = engine->process_event(ev, &match);
 		if(res)
 		{
 			outputs->handle_event(res->evt, res->rule, res->priority, res->format);
@@ -259,12 +262,15 @@ int falco_init(int argc, char **argv)
 	{
 		set<string> disabled_rule_patterns;
 		string pattern;
+		set<string> disabled_rule_tags;
+		set<string> run_rule_tags;
+		falco_engine::tag_match_t match;
 
 		//
 		// Parse the args
 		//
 		while((op = getopt_long(argc, argv,
-                                        "hc:AdD:e:k:K:Ll:m:o:P:p:r:s:vw:",
+                                        "hc:AdD:e:k:K:Ll:m:o:P:p:r:sT:t::vw:",
                                         long_options, &long_index)) != -1)
 		{
 			switch(op)
@@ -338,6 +344,12 @@ int falco_init(int argc, char **argv)
 				break;
 			case 's':
 				stats_filename = optarg;
+				break;
+			case 'T':
+				disabled_rule_tags.insert(optarg);
+				break;
+			case 't':
+				run_rule_tags.insert(optarg);
 				break;
 			case 'v':
 				verbose = true;
@@ -426,6 +438,20 @@ int falco_init(int argc, char **argv)
 			falco_logger::log(LOG_INFO, "Disabling rules matching pattern: " + pattern + "\n");
 			engine->enable_rule(pattern, false);
 		}
+
+		// The falco engine has two mechanisms to allow filtering which rules are run:
+		//  - a global mechanism, using falco_engine::enable_rule_by_tag()
+		//  - a per-event mechanism, using falco_engine::gen_tag_match()
+		//    and providing a match argument to process_evt.
+		//
+		// We use the global mechanism for disabled_rule_tags
+		// and the local mechanism for enabled_rule_tags. We
+		// could just use enable_rule_by_tag() for both, but
+		// doing it this way allows exercising both
+		// mechanisms.
+		engine->enable_rule_by_tag(disabled_rule_tags, false);
+
+		match = engine->gen_tag_match(run_rule_tags);
 
 		outputs->init(config.m_json_output, config.m_notifications_rate, config.m_notifications_max_burst);
 
@@ -610,7 +636,8 @@ int falco_init(int argc, char **argv)
 		num_evts = do_inspect(engine,
 				      outputs,
 				      inspector,
-				      stats_filename);
+				      stats_filename,
+				      match);
 
 		duration = ((double)clock()) / CLOCKS_PER_SEC - duration;
 

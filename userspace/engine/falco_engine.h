@@ -20,6 +20,7 @@ along with falco.  If not, see <http://www.gnu.org/licenses/>.
 
 #include <string>
 #include <memory>
+#include <set>
 
 #include "sinsp.h"
 #include "filter.h"
@@ -51,6 +52,29 @@ public:
 	//
 	void enable_rule(std::string &pattern, bool enabled);
 
+	//
+	// Enable/Disable any rules with any of the provided tags (set, exact matches only)
+	//
+	void enable_rule_by_tag(std::set<string> &tags, bool enabled);
+
+	//
+	// Given a set of rules as strings, return an object
+	// that can be passed to process_event(), which will in turn
+	// limit the set of (loaded) rules that runs.
+	//
+	// Throws an exception if one of the tag strings provided does
+	// not map to any tag in any rule.
+	//
+	// This is slightly different than using enable_rule_by_tag,
+	// as it allows having a single loaded rule set be used by
+	// multiple executors, each of whom wants to run a slightly
+	// different subset of the loaded rules.
+	//
+
+	typedef std::set<sinsp_evttype_filter::tag_t> tag_match_t;
+
+	tag_match_t gen_tag_match(std::set<string> &tags);
+
 	struct rule_result {
 		sinsp_evt *evt;
 		std::string rule;
@@ -63,8 +87,11 @@ public:
 	// engine and if a matching rule is found, return details on
 	// the rule that matched. If no rule matched, returns NULL.
 	//
+	// If tag_match_t is non-NULL, only those rules matching the
+	// tags in match will be run.
+	//
 	// the reutrned rule_result is allocated and must be delete()d.
-	std::unique_ptr<rule_result> process_event(sinsp_evt *ev);
+	std::unique_ptr<rule_result> process_event(sinsp_evt *ev, tag_match_t *match = NULL);
 
 	//
 	// Print details on the given rule. If rule is NULL, print
@@ -78,11 +105,12 @@ public:
 	void print_stats();
 
 	//
-	// Add a filter, which is related to the specified list of
+	// Add a filter, which is related to the specified set of
 	// event types, to the engine.
 	//
 	void add_evttype_filter(std::string &rule,
-				list<uint32_t> &evttypes,
+				set<uint32_t> &evttypes,
+				set<string> &tags,
 				sinsp_filter* filter);
 
 	// Clear all existing filters.
@@ -121,6 +149,13 @@ private:
 
 	falco_rules *m_rules;
 	std::unique_ptr<sinsp_evttype_filter> m_evttype_filter;
+
+	//
+	// Maps from tag name to tag id. Allows for more efficient tag
+	// comparisons than doing a bunch of string matches.
+	//
+	std::map<std::string, sinsp_evttype_filter::tag_t> m_known_tags;
+	sinsp_evttype_filter::tag_t m_next_tag;
 
 	//
 	// Here's how the sampling ratio and multiplier influence

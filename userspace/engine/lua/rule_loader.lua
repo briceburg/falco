@@ -309,7 +309,7 @@ function load_rules(rules_content, rules_mgr, verbose, all_events, extra, replac
 	 install_filter(filter_ast.filter.value)
 
 	 -- Pass the filter and event types back up
-	 falco_rules.add_filter(rules_mgr, v['rule'], evttypes)
+	 falco_rules.add_filter(rules_mgr, v['rule'], evttypes, v['tags'])
 
 	 -- Rule ASTs are merged together into one big AST, with "OR" between each
 	 -- rule.
